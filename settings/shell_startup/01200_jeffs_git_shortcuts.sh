@@ -18,7 +18,7 @@ function git_sync { # git push && git pull
         args="-"
     fi
     # https://stackoverflow.com/questions/3745135/push-git-commits-tags-simultaneously
-    git add -A && git commit -m "$args" && git pull --no-edit && git submodule update --init --recursive && git push
+    git add -A && git commit -m "$args"; git pull --no-edit && git submodule update --init --recursive && git push
 }
 
 function git_force_push {
@@ -98,7 +98,7 @@ function git_push_submodules {
     if [[ "$args" = "" ]]; then
         args="-"
     fi
-    git submodule foreach --recursive 'git add -A && git commit -m "'"$args"'" && git push'
+    git submodule foreach --recursive 'git add -A && git commit -m "'"$args"'"; git push'
 }
 
 # 
