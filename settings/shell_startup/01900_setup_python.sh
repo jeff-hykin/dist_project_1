@@ -6,7 +6,7 @@
 if ! [[ -d "./.venv" ]]
 then
     echo "creating virtual env for python"
-    python -m venv .venv && echo "virtual env created"
+    python -m venv .venv || python -m virtualenv .venv && echo "virtual env created"
 fi
 export VIRTUAL_ENV="$PWD/.venv"
 export PATH="$VIRTUAL_ENV/bin:$PATH"

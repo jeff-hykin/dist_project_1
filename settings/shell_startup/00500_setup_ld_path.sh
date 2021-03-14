@@ -15,7 +15,7 @@ output="$(
 export LD_LIBRARY_PATH="$output/lib/:$LD_LIBRARY_PATH"
 # FIXME: don't hardcode this stuff
 path_to_openssl_file="/nix/store/r74ag7zrmm6yyfhgxbifz5xvnks3slg6-openssl-1.1.1g-dev/include/openssl/opensslv.h"
-if [[ -f "$path_to_openssl_file" ]]
+if ! [[ -f "$path_to_openssl_file" ]]
 then
     echo 
     echo 
