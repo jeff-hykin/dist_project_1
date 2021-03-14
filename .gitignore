@@ -1,7 +1,11 @@
 # 
 # Custom
 # 
-\.idea
+__pycache__/
+lib/
+tmp/
+*.pyc
+gcp-credential.json
 
 # 
 # standard
