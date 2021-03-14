@@ -3,6 +3,7 @@ from file_system import FS
 
 import os
 import sys
+from array import array
 
 class AWS_S3(cloud_storage):
     def __init__(self):
@@ -61,7 +62,58 @@ class RAID_on_Cloud(NAS):
                 Azure_Blob_Storage(),
                 Google_Cloud_Storage()
             ]
-        
-        
-    # Implement the abstract functions from NAS
-
+    
+    def open(self, filename):
+        uses_aws, uses_azure, uses_gcs = _which_providers(file_system)
+        # FIXME: I guess I'm supposed figure out the offset of the file
+    
+    def read(self, fd, len, offset):
+        pass
+    
+    def write(self, fd, data, offset):
+        pass
+    
+    def close(self, fd):
+        pass
+    
+    def delete(self, filename):
+        pass
+    
+    def get_storage_sizes(self):
+        pass
+    
+    # helpers
+    def _which_providers(self, filename):
+        # hashed twice because the once-hashed value is already being used
+        which_combo = hash(str(hash(filename))) % 3
+        use_aws   = False
+        use_azure = False
+        use_gcs   = False
+        if which_combo == 0:
+            use_aws   = True
+            use_azure = True
+            # use_gcs   = False
+        elif which_combo == 1:
+            # use_aws   = False
+            use_azure = True
+            use_gcs   = True
+        else:
+            use_aws   = True
+            # use_azure = False
+            use_gcs   = True
+        return (use_aws, use_azure, use_gcs)
+    
+    def _get_address(self, filename, block_number):
+        # I know this looks weird, but it should prevent collisions
+        # just doing a hash(filename+str(block_number)) would cause tonz of collisions
+        hash_for_number = hash(str(block_number))
+        hash_for_file = hash(filename)
+        uuid_hopefully = hash(str(hash_for_file) + str(hash_for_number))
+        return uuid_hopefully
+    
+    def _file_blocks(self, filepath):
+        binary_array = FS.read(filepath, into="binary_array")
+        # split it into blocks
+        return [
+            binary_array[i:i + self.block_size] for i in xrange(0, len(binary_array), self.block_size)
+        ]

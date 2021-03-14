@@ -13,6 +13,18 @@ import shutil
 # 
 class FileSystem():
     @classmethod
+    def size_of(self, file_path):
+        import os
+        if self.is_dir(file_path):
+            raise Exception('Sorry FS.size_of() currently does not work on folders')
+            
+        file = open(file_path)
+        file.seek(0, os.SEEK_END)
+        number_of_bytes = file.tell()
+        file.close()
+        return number_of_bytes
+    
+    @classmethod
     def write(self, data, to=None):
         # make sure the path exists
         self.makedirs(os.path.dirname(to))
@@ -20,21 +32,28 @@ class FileSystem():
             the_file.write(str(data))
     
     @classmethod
-    def read(self, filepath):
+    def read(self, file_path, into="string"):
         try:
-            with open(filepath,'r') as f:
-                output = f.read()
+            if into == "string":
+                with open(file_path,'r') as f:
+                    output = f.read()
+            elif into == "binary_array":
+                size = self.size_of(file_path)
+                from array import array
+                output = array('B')
+                with open(file_path, 'rb') as f:
+                    output.fromfile(f, size)
         except:
             output = None
         return output    
         
     @classmethod
-    def delete(self, filepath):
-        if isdir(filepath):
-            shutil.rmtree(filepath)
+    def delete(self, file_path):
+        if isdir(file_path):
+            shutil.rmtree(file_path)
         else:
             try:
-                os.remove(filepath)
+                os.remove(file_path)
             except:
                 pass
     
@@ -110,15 +129,15 @@ class FileSystem():
         return [ self.basename(x) for x in self.ls(path) if self.is_folder(x) ]
     
     @classmethod
-    def ls(self, filepath="."):
-        glob_val = filepath
-        if os.path.isdir(filepath):
-            glob_val = os.path.join(filepath, "*")
+    def ls(self, file_path="."):
+        glob_val = file_path
+        if os.path.isdir(file_path):
+            glob_val = os.path.join(file_path, "*")
         return glob.glob(glob_val)
 
     @classmethod
-    def glob(self, filepath):
-        return glob.glob(filepath)
+    def glob(self, file_path):
+        return glob.glob(file_path)
 
     @classmethod
     def touch(self, path):
@@ -155,7 +174,7 @@ class FileSystem():
     def path_pieces(self, path):
         """
         example:
-            *folders, file_name, file_extension = self.path_pieces("/this/is/a/filepath.txt")
+            *folders, file_name, file_extension = self.path_pieces("/this/is/a/file_path.txt")
         """
         folders = []
         while 1:
@@ -186,9 +205,9 @@ class FileSystem():
         return os.getcwd()
     
     @classmethod
-    def json_read(self, filepath):
+    def json_read(self, file_path):
         import json
-        with open(filepath,) as f:
+        with open(file_path,) as f:
             data = json.load(f) 
         return data
             
