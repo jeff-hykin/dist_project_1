@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+echo "loading python"
+module load Python/2.7.18-GCCcore-10.2.0
+
+echo "installing modules"
+source ./settings/commands/install_pip_packages
