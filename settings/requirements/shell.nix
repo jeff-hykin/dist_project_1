@@ -83,11 +83,11 @@ let
     
     majorCustomDependencies = rec {
         python = [
-            definitions.mainPackages.python37
-            definitions.mainPackages.python37Packages.setuptools
-            definitions.mainPackages.python37Packages.pip
-            definitions.mainPackages.python37Packages.virtualenv
-            definitions.mainPackages.python37Packages.wheel
+            definitions.mainPackages.python27
+            definitions.mainPackages.python27Packages.setuptools
+            definitions.mainPackages.python27Packages.pip
+            definitions.mainPackages.python27Packages.virtualenv
+            definitions.mainPackages.python27Packages.wheel
         ];
     };
     
