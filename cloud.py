@@ -1,16 +1,15 @@
 from basic_defs import cloud_storage, NAS
+from file_system import FS
 
 import os
 import sys
 
 class AWS_S3(cloud_storage):
     def __init__(self):
-        # TODO: Fill in the AWS access key ID
-        self.access_key_id = ""
-        # TODO: Fill in the AWS access secret key
-        self.access_secret_key = ""
-        # TODO: Fill in the bucket name
-        self.bucket_name = ""
+        aws_data = FS.json_read("./settings/passwords.dont-sync/aws.json")
+        self.access_key_id     = aws_data["access_key_id"]
+        self.access_secret_key = aws_data["access_secret_key"]
+        self.bucket_name       = aws_data["bucket_name"]
 
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from boto3
@@ -25,14 +24,11 @@ class AWS_S3(cloud_storage):
 
 class Azure_Blob_Storage(cloud_storage):
     def __init__(self):
-        # TODO: Fill in the Azure key
-        self.key = ""
-        # TODO: Fill in the Azure connection string
-        self.conn_str = ""
-        # TODO: Fill in the account name
-        self.account_name = "csce678s21"
-        # TODO: Fill in the container name
-        self.container_name = ""
+        auth_info = FS.json_read("./settings/passwords.dont-sync/azure.json")
+        self.key            = auth_info["key"]
+        self.conn_str       = auth_info["conn_str"]
+        self.account_name   = auth_info["account_name"]
+        self.container_name = auth_info["container_name"]
 
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from azure.storage.blob
@@ -46,10 +42,8 @@ class Azure_Blob_Storage(cloud_storage):
 class Google_Cloud_Storage(cloud_storage):
     def __init__(self):
         # Google Cloud Storage is authenticated with a **Service Account**
-        # TODO: Download and place the Credential JSON file
-        self.credential_file = "gcp-credential.json"
-        # TODO: Fill in the container name
-        self.bucket_name = ""
+        self.credential_file = "./settings/passwords.dont-sync/gcp-credential.json"
+        self.bucket_name = "csce678-s21-p1-326001802"
 
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from google.cloud.storage
@@ -67,6 +61,7 @@ class RAID_on_Cloud(NAS):
                 Azure_Blob_Storage(),
                 Google_Cloud_Storage()
             ]
-
+        
+        
     # Implement the abstract functions from NAS
 
