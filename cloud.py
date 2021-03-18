@@ -49,7 +49,7 @@ class AWS_S3(cloud_storage):
 
     def read_block(self, offset):
         try:
-            self._get_object(key=offset)
+            return self._get_object(key=offset)
         except botocore.exceptions.ClientError as e:
             return None
 
@@ -301,33 +301,118 @@ class RAID_on_Cloud(NAS):
                 Azure_Blob_Storage(),
                 Google_Cloud_Storage()
             ]
+        self.block_size = 4096
     
     def open(self, filename):
-        # this seems too simple ... but as far as I can tell it meets the requirements
+        # this seems too simple  but as far as I can tell it meets the requirements
         # (intentionally use builtin hash function)
         return hash(filename)
     
     
     def read(self, fd, len, offset):
+        """
+        Reading the file descriptor up to the given number of bytes, at the given offset. Once the file is read successfully, the CLI will prints the output directly on the screen as UTF-8 strings.
+        """
         starting_point = offset
-        how_many_bytes_to_read = len
+        how_many_bytes = len
         del len # len is a built in
-        blocks = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes_to_read))
+        block_ranges = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
+        output = ""
+        # for each block
+        for (use_service, uuid, local_start, local_end, is_final_block) in block_ranges:
+            block_addition = None
+            for use_service, backend in zip(use_service, self.backends):
+                if use_service:
+                    # make resiliant by only working if the backend works
+                    if type(block_string) == str:
+                        block_addition = block_string[start:end]
+                        # if success, don't retreive the block from both
+                        break
+            # fail immediate / log
+            if type(block_addition) != str:
+                raise Exception('ERROR: block: '+str((use_service, uuid, local_start, local_end))+'\n              (use_service, uuid, local_start, local_end)\n\nhad an issue and wasnt able to get the data from either source')
+            
+            output += block_addition
         
-        
-        pass
+        # convert from fixed length into full unicode
+        unicode_output = self._garbled_ascii_to_utf8(output)
+        print(unicode_output)
     
     def write(self, fd, data, offset):
-        pass
+        """
+        Reading the string from the screen and write to the file descriptor at the given offset. The string will be read until the CLI detects a line break followed by a Control-D.
+        """
+        starting_point = offset
+        # ensure that the data is properly encoded so we can write without issue and measure bytes without issue
+        ascii_data     = self._utf8_to_garbled_ascii(data)
+        how_many_bytes = len(ascii_data)
+        block_ranges   = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
+        index = 0
+        for (use_backend, block_uuid, local_start, local_end, is_final_block) in block_ranges:
+            # get the data based on the offset
+            data_for_block = ascii_data[block_start_within_string:block_end_within_string]
+            # increment for next block
+            index += local_end
+            
+            # save 
+            block_start_within_string = index + local_start
+            block_end_within_string   = index + local_end
+            # for each of backends that are pseudo-randomly selected
+            for use_service, backend in zip(use_backend, self.backends):
+                if use_service:
+                    # create a filler of 0's if no data exists
+                    base_data = str(bytearray(self.block_size))
+                    prexisting_string = backend.read_block(offset=uuid)
+                    if prexisting_string is None:
+                        prexisting_string = ""
+                    
+                    base_data = prexisting_string + base_data
+                    
+                    # the start is always filled up with some kind of data
+                    pre_data = base_data[0:local_start]
+                    # the ending data won't be preserved if this is the final block
+                    post_data = base_data[local_end:self.block_size] if not is_final_block else ""
+                    # if only writing in the middle, make sure to pad the sides
+                    data_for_block = pre_data + data_for_block + post_data
+                    # len(data_for_block) should be self.block_size for sure if its not the final block
+                    
+                    # save the whole block
+                    backend.write_block(block=data_for_block, offset=block_uuid)
+        
     
     def close(self, fd):
-        pass
+        pass # intentionally pass
     
     def delete(self, filename):
-        pass
+        fd = self.open(filename)
+        file_prefix = self._get_prefix(filename)
+        for each_backend in self.backends:
+            uuids = each_backend.list_blocks()
+            for each_block_id in uuids:
+                if each_block_id.startswith(file_prefix):
+                    each_backend.delete_block(offset=each_block_id)
     
-    def get_storage_sizes(self):
-        pass
+    def _utf8_to_garbled_ascii(self, string):
+        # is this very roundabout? yes
+        # is it the only way I could find in python2 and be certain about? yes
+        # (python2's unicode/ascii/binary has problems)
+        import binascii
+        string_bytes = bytearray(u""+string, encoding="utf-8")
+        hex_string = binascii.hexlify(string_bytes)
+        ascii_string = ""
+        for index in range(0, len(hex_string), 2): 
+            # extract two characters from hex string 
+            part = hex_string[index : index + 2] 
+            # change it into base 16 and 
+            # typecast as the character  
+            ascii_string += chr(int(part, 16)) 
+        
+        # python2 treats ascii the same as a bytes object in python3
+        return ascii_string
+    
+    def _garbled_ascii_to_utf8(self, string):
+        # we're hoping it is a properly encoded ascii
+        return string.decode('utf8', errors='replace')
     
     # helpers
     def _which_providers(self, hash_address):
@@ -349,13 +434,17 @@ class RAID_on_Cloud(NAS):
             use_gcs   = True
         return (use_aws, use_azure, use_gcs)
     
+    def _get_prefix(fd):
+        return str(fd)+"-"
+    
     def _get_uuid(self, fd, block_index):
         # I know this looks weird, but it should prevent collisions
         # just doing a hash_it(filename+str(block_index)) would cause tonz of collisions
         hash_for_number = hash_it(block_index)
         hash_for_file = hash_it(fd)
         uuid_hopefully = hash_it(hash_for_file + hash_for_number)
-        return uuid_hopefully
+        prefix = str(fd)+"-"
+        return self._get_prefix(fd)+uuid_backtraceable
     
     def _get_address_range(self, start_block_index=0, start_offset=0, end_block_index=0, end_offset=0):
         start_byte_index = (self.block_size * start_block_index) + start_offset
@@ -376,6 +465,9 @@ class RAID_on_Cloud(NAS):
         return actual_start_block_index, actual_start_offset, local_end
             
     def _get_segmentation(self, start_index, end_index):
+        """
+        :returns [(block_index, local_start, local_end)]
+        """
         # no blocks
         if start_index == end_index:
             return []
@@ -391,11 +483,19 @@ class RAID_on_Cloud(NAS):
         return segments
         
     def _get_block_ranges(self, fd, start_index, end_index):
+        """
+        returns [ ((use_aws, use_azure, use_gcs), uuid, local_start, local_end, is_final_block) ]
+        """
         segments = self._get_segmentation(start_index, end_index)
         blocks = []
-        for each in segments:
-            (use_aws, use_azure, use_gcs) = self._which_providers(uuid)
+        for block_index, local_start, local_end in segments:
             uuid = self._get_uuid(fd, block_index)
-            segments.append(((use_aws, use_azure, use_gcs), uuid, local_start, local_end))
+            (use_aws, use_azure, use_gcs) = self._which_providers(uuid)
+            blocks.append(((use_aws, use_azure, use_gcs), uuid, local_start, local_end, False))
         
+        # set the "is_final_block" for the last one
+        if len(blocks) > 1:
+            blocks[-1][-1] = True
+            
         return blocks
+    
