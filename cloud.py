@@ -214,15 +214,16 @@ class Azure_Blob_Storage(cloud_storage):
          # Instantiate a BlobServiceClient using a connection string
         from azure.storage.blob import BlobServiceClient
         self.blob_service_client = BlobServiceClient.from_connection_string(self.conn_str)
-        self.container = self.blob_service_client.get_container_client(container=self.container_name)
+        self.container_client = self.blob_service_client.get_container_client(container=self.container_name)
         # self.blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=local_file_name)
         
 
         # Instantiate a ContainerClient
 
     def list_blocks(self):
-        raise NotImplementedError
-
+        for each in self.container_client.list_blobs():
+            print(each.name)
+            
     def read_block(self, offset):
         try:
             blob_client = self.blob_service_client.get_blob_client(self.container_name, offset)
