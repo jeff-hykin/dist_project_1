@@ -5,9 +5,9 @@ import json
 import logging
 import os
 import random
-import uuid
 
 from botocore.exceptions import ClientError
+import botocore
 
 logger = logging.getLogger(__name__)
 
@@ -275,7 +275,10 @@ class Google_Cloud_Storage(cloud_storage):
 
     def read_block(self, offset):
         blob = self.bucket.blob(offset)
-        return blob.download_as_string()
+        try:
+            return blob.download_as_string()
+        except Exception as error:
+            return None
 
     def write_block(self, block, offset):
         blob = self.bucket.blob(offset)
@@ -317,20 +320,26 @@ class RAID_on_Cloud(NAS):
         how_many_bytes = len
         del len # len is a built in
         block_ranges = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
+        index = 0
         output = ""
         # for each block
-        for (use_service, uuid, local_start, local_end, is_final_block) in block_ranges:
+        for (use_backend, block_id, local_start, local_end, is_final_block) in block_ranges:
+            block_start_within_string = index + local_start
+            block_end_within_string   = index + local_end
+            # increment for next block
+            index += local_end
             block_addition = None
-            for use_service, backend in zip(use_service, self.backends):
+            for use_service, backend in zip(use_backend, self.backends):
                 if use_service:
+                    block_string = backend.read_block(offset=block_id)
                     # make resiliant by only working if the backend works
                     if type(block_string) == str:
-                        block_addition = block_string[start:end]
+                        block_addition = block_string[block_start_within_string:block_end_within_string]
                         # if success, don't retreive the block from both
                         break
             # fail immediate / log
             if type(block_addition) != str:
-                raise Exception('ERROR: block: '+str((use_service, uuid, local_start, local_end))+'\n              (use_service, uuid, local_start, local_end)\n\nhad an issue and wasnt able to get the data from either source')
+                raise Exception('ERROR: block: '+str((use_backend, block_id, local_start, local_end, is_final_block))+'\n              (use_backend, block_id, local_start, local_end, is_final_block)\n\nhad an issue and wasnt able to get the data from any sources')
             
             output += block_addition
         
@@ -349,20 +358,19 @@ class RAID_on_Cloud(NAS):
         block_ranges   = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
         index = 0
         for (use_backend, block_uuid, local_start, local_end, is_final_block) in block_ranges:
+            block_start_within_string = index + local_start
+            block_end_within_string   = index + local_end
             # get the data based on the offset
             data_for_block = ascii_data[block_start_within_string:block_end_within_string]
             # increment for next block
             index += local_end
             
-            # save 
-            block_start_within_string = index + local_start
-            block_end_within_string   = index + local_end
             # for each of backends that are pseudo-randomly selected
             for use_service, backend in zip(use_backend, self.backends):
                 if use_service:
                     # create a filler of 0's if no data exists
                     base_data = str(bytearray(self.block_size))
-                    prexisting_string = backend.read_block(offset=uuid)
+                    prexisting_string = backend.read_block(offset=block_uuid)
                     if prexisting_string is None:
                         prexisting_string = ""
                     
@@ -434,7 +442,7 @@ class RAID_on_Cloud(NAS):
             use_gcs   = True
         return (use_aws, use_azure, use_gcs)
     
-    def _get_prefix(fd):
+    def _get_prefix(self, fd):
         return str(fd)+"-"
     
     def _get_uuid(self, fd, block_index):
@@ -444,7 +452,7 @@ class RAID_on_Cloud(NAS):
         hash_for_file = hash_it(fd)
         uuid_hopefully = hash_it(hash_for_file + hash_for_number)
         prefix = str(fd)+"-"
-        return self._get_prefix(fd)+uuid_backtraceable
+        return self._get_prefix(fd)+uuid_hopefully
     
     def _get_address_range(self, start_block_index=0, start_offset=0, end_block_index=0, end_offset=0):
         start_byte_index = (self.block_size * start_block_index) + start_offset
@@ -489,9 +497,9 @@ class RAID_on_Cloud(NAS):
         segments = self._get_segmentation(start_index, end_index)
         blocks = []
         for block_index, local_start, local_end in segments:
-            uuid = self._get_uuid(fd, block_index)
-            (use_aws, use_azure, use_gcs) = self._which_providers(uuid)
-            blocks.append(((use_aws, use_azure, use_gcs), uuid, local_start, local_end, False))
+            block_uuid = self._get_uuid(fd, block_index)
+            (use_aws, use_azure, use_gcs) = self._which_providers(block_uuid)
+            blocks.append(((use_aws, use_azure, use_gcs), block_uuid, local_start, local_end, False))
         
         # set the "is_final_block" for the last one
         if len(blocks) > 1:
