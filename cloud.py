@@ -54,10 +54,10 @@ class AWS_S3(cloud_storage):
             return None
 
     def write_block(self, block, offset):
-        self._put_object()
+        return self._put_object(key=offset, data=block)
 
     def delete_block(self, offset):
-        raise NotImplementedError
+        return self._delete_object(key=offset)
     
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from boto3
@@ -69,6 +69,10 @@ class AWS_S3(cloud_storage):
     #         https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html#bucket
     #     boto3.s3.Object:
     #         https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html#object
+    
+    # 
+    # helpers modified from AWS documentation (below)
+    # 
 
     def _put_object(self, key, data):
         """
@@ -84,9 +88,6 @@ class AWS_S3(cloud_storage):
         """
         bucket = self.bucket
         put_data = data
-        # # convert strings to bytes
-        # if type(data) == str:
-        #     put_data = bytes(data, 'utf-8')
 
         try:
             obj = bucket.Object(key)
@@ -146,27 +147,27 @@ class AWS_S3(cloud_storage):
         else:
             return objects
 
-    def _delete_object(self, object_key):
+    def _delete_object(self, key):
         """
         Removes an object from a bucket.
 
         Usage is shown in usage_demo at the end of this module.
 
         :param bucket: The bucket that contains the object.
-        :param object_key: The key of the object to delete.
+        :param key: The key of the object to delete.
         """
         bucket = self.bucket
         try:
-            obj = bucket.Object(object_key)
+            obj = bucket.Object(key)
             obj.delete()
             obj.wait_until_not_exists()
-            logger.info("Deleted object '%s' from bucket '%s'.", object_key, bucket.name)
+            logger.info("Deleted object '%s' from bucket '%s'.", key, bucket.name)
         except ClientError:
             logger.exception("Couldn't delete object '%s' from bucket '%s'.",
-                            object_key, bucket.name)
+                            key, bucket.name)
             raise
 
-    def _delete_objects(self, object_keys):
+    def _delete_objects(self, keys):
         """
         Removes a list of objects from a bucket.
         This operation is done as a batch in a single request.
@@ -174,14 +175,14 @@ class AWS_S3(cloud_storage):
         Usage is shown in usage_demo at the end of this module.
 
         :param bucket: The bucket that contains the objects.
-        :param object_keys: The list of keys that identify the objects to remove.
+        :param keys: The list of keys that identify the objects to remove.
         :return: The response that contains data about which objects were deleted
                 and any that could not be deleted.
         """
         bucket = self.bucket
         try:
             response = bucket._delete_objects(Delete={
-                'Objects': [ { 'Key': key } for key in object_keys ]
+                'Objects': [ { 'Key': key } for key in keys ]
             })
             if 'Deleted' in response:
                 logger.info(
