@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "__path__ = __import__('pkgutil').extend_path(__path__, __name__)" > lib/google/__init__.py
+cp lib/google/__init__.py lib/google/cloud/__init__.py

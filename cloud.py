@@ -255,21 +255,35 @@ class Azure_Blob_Storage(cloud_storage):
 
 class Google_Cloud_Storage(cloud_storage):
     def __init__(self):
+        from google.cloud import storage
         # Google Cloud Storage is authenticated with a **Service Account**
         self.credential_file = "./settings/passwords.dont-sync/gcp-credential.json"
         self.bucket_name = "csce678-s21-p1-326001802"
-
+        self.client = storage.Client.from_service_account_json(self.credential_file)
+        self.bucket = self.client.lookup_bucket(self.bucket_name)
+        
+        # self.bucket.delete_blob
+        # self.bucket.get_blob
+        # self.bucket.labels
+        # self.bucket.list_blobs
+        # self.bucket.blob
+        
+        
     def list_blocks(self):
-        raise NotImplementedError
+        for each in self.bucket.list_blobs():
+            print(str(each.name))
 
     def read_block(self, offset):
-        raise NotImplementedError
+        blob = self.bucket.blob(offset)
+        return blob.download_as_string()
 
     def write_block(self, block, offset):
-        raise NotImplementedError
+        blob = self.bucket.blob(offset)
+        return blob.upload_from_string(block)
 
     def delete_block(self, offset):
-        raise NotImplementedError
+        blob = self.bucket.blob(offset)
+        return blob.delete()
     
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from google.cloud.storage
