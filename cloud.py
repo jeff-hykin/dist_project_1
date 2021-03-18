@@ -210,18 +210,33 @@ class Azure_Blob_Storage(cloud_storage):
         self.conn_str       = auth_info["conn_str"]
         self.account_name   = auth_info["account_name"]
         self.container_name = auth_info["container_name"]
+        
+         # Instantiate a BlobServiceClient using a connection string
+        from azure.storage.blob import BlobServiceClient
+        self.blob_service_client = BlobServiceClient.from_connection_string(self.conn_str)
+        self.container = self.blob_service_client.get_container_client(container=self.container_name)
+        # self.blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=local_file_name)
+        
+
+        # Instantiate a ContainerClient
 
     def list_blocks(self):
         raise NotImplementedError
 
     def read_block(self, offset):
-        raise NotImplementedError
+        try:
+            blob_client = self.blob_service_client.get_blob_client(self.container_name, offset)
+            return blob_client.download_blob().readall()
+        except Exception as error:
+            return None
 
     def write_block(self, block, offset):
-        raise NotImplementedError
-
+        blob_client = self.blob_service_client.get_blob_client(self.container_name, offset)
+        return blob_client.upload_blob(block, overwrite=True)
+        
     def delete_block(self, offset):
-        raise NotImplementedError
+        blob_client = self.blob_service_client.get_blob_client(self.container_name, offset)
+        return blob_client.delete_blob()
     
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from azure.storage.blob
@@ -231,6 +246,11 @@ class Azure_Blob_Storage(cloud_storage):
     #        https://docs.microsoft.com/en-us/python/api/azure-storage-blob/azure.storage.blob.containerclient?view=azure-python
     #    blob.BlobClient:
     #        https://docs.microsoft.com/en-us/python/api/azure-storage-blob/azure.storage.blob.blobclient?view=azure-python
+    
+    def _get_blob(self, key):
+        return self.blob_service_client.get_blob_client(container=self.container_name, blob=key)
+        
+        
 
 class Google_Cloud_Storage(cloud_storage):
     def __init__(self):
