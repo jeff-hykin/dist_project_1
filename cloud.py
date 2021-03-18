@@ -4,6 +4,10 @@ from file_system import FS
 import os
 import sys
 from array import array
+import hashlib
+import boto3
+
+hash_it = lambda value: hashlib.sha256(str(value).encode()).hexdigest()
 
 class AWS_S3(cloud_storage):
     def __init__(self):
@@ -11,7 +15,32 @@ class AWS_S3(cloud_storage):
         self.access_key_id     = aws_data["access_key_id"]
         self.access_secret_key = aws_data["access_secret_key"]
         self.bucket_name       = aws_data["bucket_name"]
+        
+        self.s3 = boto3.resource(
+            's3',
+            aws_access_key_id=self.access_key_id,
+            aws_secret_access_key=self.access_secret_key,
+        )
+        self.session = boto3.Session(
+            aws_access_key_id=self.access_key_id,
+            aws_secret_access_key=self.access_secret_key
+        )
 
+        self.bucket = self.s3.Bucket(aws_data["bucket_name"])
+
+    def list_blocks(self):
+        for each in self.bucket.objects.all():
+            print(each)
+
+    def read_block(self, offset):
+        raise NotImplementedError
+
+    def write_block(self, block, offset):
+        raise NotImplementedError
+
+    def delete_block(self, offset):
+        raise NotImplementedError
+    
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from boto3
     #     boto3.session.Session:
@@ -31,6 +60,18 @@ class Azure_Blob_Storage(cloud_storage):
         self.account_name   = auth_info["account_name"]
         self.container_name = auth_info["container_name"]
 
+    def list_blocks(self):
+        raise NotImplementedError
+
+    def read_block(self, offset):
+        raise NotImplementedError
+
+    def write_block(self, block, offset):
+        raise NotImplementedError
+
+    def delete_block(self, offset):
+        raise NotImplementedError
+    
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from azure.storage.blob
     #    blob.BlobServiceClient:
@@ -46,6 +87,18 @@ class Google_Cloud_Storage(cloud_storage):
         self.credential_file = "./settings/passwords.dont-sync/gcp-credential.json"
         self.bucket_name = "csce678-s21-p1-326001802"
 
+    def list_blocks(self):
+        raise NotImplementedError
+
+    def read_block(self, offset):
+        raise NotImplementedError
+
+    def write_block(self, block, offset):
+        raise NotImplementedError
+
+    def delete_block(self, offset):
+        raise NotImplementedError
+    
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from google.cloud.storage
     #    storage.client.Client:
@@ -64,10 +117,18 @@ class RAID_on_Cloud(NAS):
             ]
     
     def open(self, filename):
-        uses_aws, uses_azure, uses_gcs = _which_providers(file_system)
-        # FIXME: I guess I'm supposed figure out the offset of the file
+        # this seems too simple ... but as far as I can tell it meets the requirements
+        # (intentionally use builtin hash function)
+        return hash(filename)
+    
     
     def read(self, fd, len, offset):
+        starting_point = offset
+        how_many_bytes_to_read = len
+        del len # len is a built in
+        blocks = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes_to_read))
+        
+        
         pass
     
     def write(self, fd, data, offset):
@@ -83,9 +144,8 @@ class RAID_on_Cloud(NAS):
         pass
     
     # helpers
-    def _which_providers(self, filename):
-        # hashed twice because the once-hashed value is already being used
-        which_combo = hash(str(hash(filename))) % 3
+    def _which_providers(self, hash_address):
+        which_combo = hash(hash_address) % 3
         use_aws   = False
         use_azure = False
         use_gcs   = False
@@ -103,17 +163,53 @@ class RAID_on_Cloud(NAS):
             use_gcs   = True
         return (use_aws, use_azure, use_gcs)
     
-    def _get_address(self, filename, block_number):
+    def _get_uuid(self, fd, block_index):
         # I know this looks weird, but it should prevent collisions
-        # just doing a hash(filename+str(block_number)) would cause tonz of collisions
-        hash_for_number = hash(str(block_number))
-        hash_for_file = hash(filename)
-        uuid_hopefully = hash(str(hash_for_file) + str(hash_for_number))
+        # just doing a hash_it(filename+str(block_index)) would cause tonz of collisions
+        hash_for_number = hash_it(block_index)
+        hash_for_file = hash_it(fd)
+        uuid_hopefully = hash_it(hash_for_file + hash_for_number)
         return uuid_hopefully
     
-    def _file_blocks(self, filepath):
-        binary_array = FS.read(filepath, into="binary_array")
-        # split it into blocks
-        return [
-            binary_array[i:i + self.block_size] for i in xrange(0, len(binary_array), self.block_size)
-        ]
+    def _get_address_range(self, start_block_index=0, start_offset=0, end_block_index=0, end_offset=0):
+        start_byte_index = (self.block_size * start_block_index) + start_offset
+        actual_start_block_index = self.block_size * (start_byte_index / self.block_size)
+        actual_start_offset =  start_byte_index - actual_start_block_index
+        
+        end_byte_index = (self.block_size * end_block_index) + end_offset
+        actual_end_block_index = self.block_size * (end_byte_index / self.block_size) 
+        actual_end_offset =  end_byte_index - actual_end_block_index
+        # goes at least until the end of the block
+        if actual_end_block_index >= 1+actual_start_block_index:
+            local_end = self.block_size
+        elif actual_end_block_index == actual_start_block_index:
+            local_end = actual_end_offset
+        else:
+            raise Exception('Something went wrong in _get_full_address_range(), end is before start\nfd='+str(fd)+'\n    start_block_index='+str(start_block_index)+'\n    start_offset='+str(start_offset)+'\n    end_block_index='+str(end_block_index)+'\n    end_offset='+str(end_offset))
+        
+        return actual_start_block_index, actual_start_offset, local_end
+            
+    def _get_segmentation(self, start_index, end_index):
+        # no blocks
+        if start_index == end_index:
+            return []
+        
+        segments = []
+        missing_number_of_bytes = end_index - start_index
+        while missing_number_of_bytes > 0:
+            block_index, local_start, local_end = self._get_address_range(start_offset=start_index, end_offset=end_index)
+            bytes_gathered = local_end - local_start
+            missing_number_of_bytes -= bytes_gathered
+            segments.append((block_index, local_start, local_end))
+        
+        return segments
+        
+    def _get_block_ranges(self, fd, start_index, end_index):
+        segments = self._get_segmentation(start_index, end_index)
+        blocks = []
+        for each in segments:
+            (use_aws, use_azure, use_gcs) = self._which_providers(uuid)
+            uuid = self._get_uuid(fd, block_index)
+            segments.append(((use_aws, use_azure, use_gcs), uuid, local_start, local_end))
+        
+        return blocks
