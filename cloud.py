@@ -1,3 +1,16 @@
+# examples taken from: https://docs.aws.amazon.com/code-samples/latest/catalog/python-s3-s3_basics-object_wrapper.py.html
+# Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+# SPDX-License-Identifier: Apache-2.0
+import json
+import logging
+import os
+import random
+import uuid
+
+from botocore.exceptions import ClientError
+
+logger = logging.getLogger(__name__)
+
 from basic_defs import cloud_storage, NAS
 from file_system import FS
 
@@ -25,18 +38,23 @@ class AWS_S3(cloud_storage):
             aws_access_key_id=self.access_key_id,
             aws_secret_access_key=self.access_secret_key
         )
-
         self.bucket = self.s3.Bucket(aws_data["bucket_name"])
-
+    
+    def _get(self, *args, **kwargs):
+        return self.s3.Object(self.bucket_name, *args, **kwargs)
+        
     def list_blocks(self):
-        for each in self.bucket.objects.all():
-            print(each)
+        for each in self._list_objects():
+            print(each.key)
 
     def read_block(self, offset):
-        raise NotImplementedError
+        try:
+            self._get_object(key=offset)
+        except botocore.exceptions.ClientError as e:
+            return None
 
     def write_block(self, block, offset):
-        raise NotImplementedError
+        self._put_object()
 
     def delete_block(self, offset):
         raise NotImplementedError
@@ -51,6 +69,138 @@ class AWS_S3(cloud_storage):
     #         https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html#bucket
     #     boto3.s3.Object:
     #         https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3.html#object
+
+    def _put_object(self, key, data):
+        """
+        Upload data to a bucket and identify it with the specified object key.
+
+        Usage is shown in usage_demo at the end of this module.
+
+        :param bucket: The bucket to receive the data.
+        :param key: The key of the object in the bucket.
+        :param data: The data to upload. This can either be bytes or a string. When this
+                    argument is a string, it is interpreted as a file name, which is
+                    opened in read bytes mode.
+        """
+        bucket = self.bucket
+        put_data = data
+        # # convert strings to bytes
+        # if type(data) == str:
+        #     put_data = bytes(data, 'utf-8')
+
+        try:
+            obj = bucket.Object(key)
+            obj.put(Body=put_data)
+            obj.wait_until_exists()
+            logger.info("Put object '%s' to bucket '%s'.", key, bucket.name)
+        except ClientError:
+            logger.exception("Couldn't put object '%s' to bucket '%s'.", key, bucket.name)
+            raise
+        finally:
+            if getattr(put_data, 'close', None):
+                put_data.close()
+
+
+    def _get_object(self, key):
+        """
+        Gets an object from a bucket.
+
+        Usage is shown in usage_demo at the end of this module.
+
+        :param bucket: The bucket that contains the object.
+        :param key: The key of the object to retrieve.
+        :return: The object data in bytes.
+        """
+        bucket = self.bucket
+        try:
+            body = bucket.Object(key).get()['Body'].read()
+            logger.info("Got object '%s' from bucket '%s'.", key, bucket.name)
+        except ClientError:
+            logger.exception(("Couldn't get object '%s' from bucket '%s'.", key, bucket.name))
+            raise
+        else:
+            return body
+
+
+    def _list_objects(self, prefix=None):
+        """
+        Lists the objects in a bucket, optionally filtered by a prefix.
+
+        Usage is shown in usage_demo at the end of this module.
+
+        :param bucket: The bucket to query.
+        :param prefix: When specified, only objects that start with this prefix are listed.
+        :return: The list of objects.
+        """
+        bucket = self.bucket
+        try:
+            if not prefix:
+                objects = list(bucket.objects.all())
+            else:
+                objects = list(bucket.objects.filter(Prefix=prefix))
+            logger.info("Got objects %s from bucket '%s'",
+                        [o.key for o in objects], bucket.name)
+        except ClientError:
+            logger.exception("Couldn't get objects for bucket '%s'.", bucket.name)
+            raise
+        else:
+            return objects
+
+    def _delete_object(self, object_key):
+        """
+        Removes an object from a bucket.
+
+        Usage is shown in usage_demo at the end of this module.
+
+        :param bucket: The bucket that contains the object.
+        :param object_key: The key of the object to delete.
+        """
+        bucket = self.bucket
+        try:
+            obj = bucket.Object(object_key)
+            obj.delete()
+            obj.wait_until_not_exists()
+            logger.info("Deleted object '%s' from bucket '%s'.", object_key, bucket.name)
+        except ClientError:
+            logger.exception("Couldn't delete object '%s' from bucket '%s'.",
+                            object_key, bucket.name)
+            raise
+
+    def _delete_objects(self, object_keys):
+        """
+        Removes a list of objects from a bucket.
+        This operation is done as a batch in a single request.
+
+        Usage is shown in usage_demo at the end of this module.
+
+        :param bucket: The bucket that contains the objects.
+        :param object_keys: The list of keys that identify the objects to remove.
+        :return: The response that contains data about which objects were deleted
+                and any that could not be deleted.
+        """
+        bucket = self.bucket
+        try:
+            response = bucket._delete_objects(Delete={
+                'Objects': [ { 'Key': key } for key in object_keys ]
+            })
+            if 'Deleted' in response:
+                logger.info(
+                    "Deleted objects '%s' from bucket '%s'.",
+                    [del_obj['Key'] for del_obj in response['Deleted']],
+                    bucket.name
+                )
+            if 'Errors' in response:
+                logger.warning(
+                    "Sadly, could not delete objects '%s' from bucket '%s'.",
+                    [ str(del_obj['Key'])+": "+str(del_obj['Code']) for del_obj in response['Errors']],
+                    bucket.name
+                )
+        except ClientError:
+            logger.exception()
+            raise
+        else:
+            return response
+
 
 class Azure_Blob_Storage(cloud_storage):
     def __init__(self):
