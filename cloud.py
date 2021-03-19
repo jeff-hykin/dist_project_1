@@ -372,7 +372,9 @@ class RAID_on_Cloud(NAS):
                 block_addition = None
                 for use_service, backend in zip(use_backend, self.backends):
                     if use_service:
-                        block_string = str(backend.read_block(offset=block_id))
+                        block_string = backend.read_block(offset=block_id)
+                        if block_string is not None:
+                            block_string = str(block_string)
                         # make resiliant by only working if the backend works
                         if type(block_string) == str:
                             block_addition = block_string[local_start:local_end]
@@ -403,30 +405,38 @@ class RAID_on_Cloud(NAS):
         ascii_data     = self._utf8_to_garbled_ascii(data)
         how_many_bytes = len(ascii_data)
         block_ranges   = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
+        count = 0
         index = 0
         for (use_backend, block_uuid, local_start, local_end, is_final_block) in block_ranges:
-            block_start_within_string = index + local_start
-            block_end_within_string   = index + local_end
+            count += 1
+            if len(block_ranges) == count:
+                is_final_block = True
+            
+            amount_of_data = local_end - local_start
             # get the data based on the offset
-            data_for_block = ascii_data[block_start_within_string:block_end_within_string]
+            data_for_block = ascii_data[index: index + amount_of_data]
             # increment for next block
-            index += local_end
+            index += amount_of_data
             
             # for each of backends that are pseudo-randomly selected
             for use_service, backend in zip(use_backend, self.backends):
                 if use_service:
                     # create a filler of 0's if no data exists
                     base_data = str(bytearray(self.block_size))
-                    prexisting_string = str(backend.read_block(offset=block_uuid))
+                    prexisting_string = backend.read_block(offset=block_uuid)
                     if prexisting_string is None:
                         prexisting_string = ""
+                    else:
+                        prexisting_string = str(prexisting_string)
                     
                     base_data = prexisting_string + base_data
-                    
+                    print('is_final_block = ', is_final_block)
+                    print('base_data = ', base_data[0:50])
                     # the start is always filled up with some kind of data
                     pre_data = base_data[0:local_start]
                     # the ending data won't be preserved if this is the final block
                     post_data = base_data[local_end:self.block_size] if not is_final_block else ""
+                    print('pre_data:',pre_data[0:50],', data_for_block:',data_for_block[0:50],", post_data:", post_data[0:50])
                     # if only writing in the middle, make sure to pad the sides
                     data_for_block = pre_data + data_for_block + post_data
                     # len(data_for_block) should be self.block_size for sure if its not the final block
@@ -502,23 +512,26 @@ class RAID_on_Cloud(NAS):
         prefix = str(fd)+"-"
         return self._get_prefix(fd)+uuid_hopefully
     
-    def _get_address_range(self, start_block_index=0, start_offset=0, end_block_index=0, end_offset=0):
-        start_byte_index = (self.block_size * start_block_index) + start_offset
-        actual_start_block_index = self.block_size * (start_byte_index / self.block_size)
-        actual_start_offset =  start_byte_index - actual_start_block_index
+    def _get_address_range(self, start_offset=0, end_offset=0):
+        start_block_index = 0
+        end_block_index = 0
         
-        end_byte_index = (self.block_size * end_block_index) + end_offset
-        actual_end_block_index = self.block_size * (end_byte_index / self.block_size) 
-        actual_end_offset =  end_byte_index - actual_end_block_index
-        # goes at least until the end of the block
-        if actual_end_block_index >= 1+actual_start_block_index:
-            local_end = self.block_size
-        elif actual_end_block_index == actual_start_block_index:
-            local_end = actual_end_offset
-        else:
-            raise Exception('Something went wrong in _get_full_address_range(), end is before start\n    start_block_index='+str(start_block_index)+'\n    start_offset='+str(start_offset)+'\n    end_block_index='+str(end_block_index)+'\n    end_offset='+str(end_offset))
+        blocks_past = start_offset / self.block_size
+        print('blocks_past = ', blocks_past)
+        actual_start_block_index = self.block_size * blocks_past
+        local_start = start_offset - actual_start_block_index
+        print('local_start = ', local_start)
         
-        return actual_start_block_index, actual_start_offset, local_end
+        print('end_offset = ', end_offset)
+        blocks_till_end = end_offset / self.block_size
+        print('blocks_till_end = ', blocks_till_end)
+        local_end = min([ self.block_size, end_offset - actual_start_block_index ])
+        
+        if local_start > local_end:
+            print('Something went wrong in _get_address_range(), end is before start\n    start_block_index='+str(start_block_index)+'\n    start_offset='+str(start_offset)+'\n    end_block_index='+str(end_block_index)+'\n    end_offset='+str(end_offset))
+            raise Exception('Something went wrong in _get_address_range(), end is before start\n    start_block_index='+str(start_block_index)+'\n    start_offset='+str(start_offset)+'\n    end_block_index='+str(end_block_index)+'\n    end_offset='+str(end_offset))
+        
+        return actual_start_block_index, local_start, local_end
             
     def _get_segmentation(self, start_index, end_index):
         """
@@ -530,18 +543,17 @@ class RAID_on_Cloud(NAS):
         
         segments = []
         missing_number_of_bytes = end_index - start_index
-        # print('missing_number_of_bytes = ', missing_number_of_bytes)
-        btye_offset = 0
         while missing_number_of_bytes > 0:
-            block_index, local_start, local_end = self._get_address_range(start_offset=(start_index+btye_offset), end_offset=end_index)
-            # print('block_index = ', block_index)
-            # print('local_start = ', local_start)
-            # print('local_end = ', local_end)
+            print '     _get_address_range: start_index = ', start_index
+            print '     _get_address_range: end_index = ', end_index
+            block_index, local_start, local_end = self._get_address_range(start_offset=start_index, end_offset=end_index)
+            print('local_start = ', local_start)
+            print('local_end = ', local_end)
             bytes_gathered = local_end - local_start
-            # print('bytes_gathered = ', bytes_gathered)
             missing_number_of_bytes -= bytes_gathered
+            print('missing_number_of_bytes = ', missing_number_of_bytes)
             segments.append((block_index, local_start, local_end))
-            btye_offset += self.block_size
+            start_index = block_index + local_end
         
         return segments
         
