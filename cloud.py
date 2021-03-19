@@ -102,9 +102,9 @@ class AWS_S3(cloud_storage):
             obj = bucket.Object(key)
             obj.put(Body=put_data)
             obj.wait_until_exists()
-            logger.info("Put object '%s' to bucket '%s'.", key, bucket.name)
+            # logger.info("Put object '%s' to bucket '%s'.", key, bucket.name)
         except ClientError:
-            logger.exception("Couldn't put object '%s' to bucket '%s'.", key, bucket.name)
+            # logger.exception("Couldn't put object '%s' to bucket '%s'.", key, bucket.name)
             raise
         finally:
             if getattr(put_data, 'close', None):
@@ -124,9 +124,9 @@ class AWS_S3(cloud_storage):
         bucket = self.bucket
         try:
             body = bucket.Object(key).get()['Body'].read()
-            logger.info("Got object '%s' from bucket '%s'.", key, bucket.name)
+            # logger.info("Got object '%s' from bucket '%s'.", key, bucket.name)
         except ClientError:
-            logger.exception(("Couldn't get object '%s' from bucket '%s'.", key, bucket.name))
+            # logger.exception(("Couldn't get object '%s' from bucket '%s'.", key, bucket.name))
             raise
         else:
             return body
@@ -148,9 +148,9 @@ class AWS_S3(cloud_storage):
                 objects = list(bucket.objects.all())
             else:
                 objects = list(bucket.objects.filter(Prefix=prefix))
-            logger.info("Got objects %s from bucket '%s'", [o.key for o in objects], bucket.name)
+            # logger.info("Got objects %s from bucket '%s'", [o.key for o in objects], bucket.name)
         except ClientError:
-            logger.exception("Couldn't get objects for bucket '%s'.", bucket.name)
+            # logger.exception("Couldn't get objects for bucket '%s'.", bucket.name)
             raise
         else:
             return objects
@@ -169,10 +169,9 @@ class AWS_S3(cloud_storage):
             obj = bucket.Object(key)
             obj.delete()
             obj.wait_until_not_exists()
-            logger.info("Deleted object '%s' from bucket '%s'.", key, bucket.name)
+            # logger.info("Deleted object '%s' from bucket '%s'.", key, bucket.name)
         except ClientError:
-            logger.exception("Couldn't delete object '%s' from bucket '%s'.",
-                            key, bucket.name)
+            # logger.exception("Couldn't delete object '%s' from bucket '%s'.", key, bucket.name)
             raise
 
     def _delete_objects(self, keys):
@@ -193,19 +192,21 @@ class AWS_S3(cloud_storage):
                 'Objects': [ { 'Key': key } for key in keys ]
             })
             if 'Deleted' in response:
-                logger.info(
-                    "Deleted objects '%s' from bucket '%s'.",
-                    [del_obj['Key'] for del_obj in response['Deleted']],
-                    bucket.name
-                )
+                # logger.info(
+                #     "Deleted objects '%s' from bucket '%s'.",
+                #     [del_obj['Key'] for del_obj in response['Deleted']],
+                #     bucket.name
+                # )
+                pass
             if 'Errors' in response:
-                logger.warning(
-                    "Sadly, could not delete objects '%s' from bucket '%s'.",
-                    [ str(del_obj['Key'])+": "+str(del_obj['Code']) for del_obj in response['Errors']],
-                    bucket.name
-                )
+                # logger.warning(
+                #     "Sadly, could not delete objects '%s' from bucket '%s'.",
+                #     [ str(del_obj['Key'])+": "+str(del_obj['Code']) for del_obj in response['Errors']],
+                #     bucket.name
+                # )
+                pass
         except ClientError:
-            logger.exception()
+            # logger.exception()
             raise
         else:
             return response
@@ -320,17 +321,23 @@ class RAID_on_Cloud(NAS):
                 Google_Cloud_Storage()
             ]
         self.block_size = 4096
+        from collections import defaultdict
+        self.is_open = defaultdict(lambda: False)
     
     def open(self, filename):
         # this seems too simple  but as far as I can tell it meets the requirements
         # (intentionally use builtin hash function)
-        return hash(filename)
+        fd = hash(filename)
+        self.is_open[fd] = True
+        return fd
     
     
     def read(self, fd, len, offset):
         """
         Reading the file descriptor up to the given number of bytes, at the given offset. Once the file is read successfully, the CLI will prints the output directly on the screen as UTF-8 strings.
         """
+        if not self.is_open[fd]:
+            return "" # I hope this is the right behavior
         starting_point = offset
         how_many_bytes = len
         del len # len is a built in
@@ -365,6 +372,8 @@ class RAID_on_Cloud(NAS):
         """
         Reading the string from the screen and write to the file descriptor at the given offset. The string will be read until the CLI detects a line break followed by a Control-D.
         """
+        if not self.is_open[fd]:
+            return # I hope this is the right behavior
         starting_point = offset
         # ensure that the data is properly encoded so we can write without issue and measure bytes without issue
         ascii_data     = self._utf8_to_garbled_ascii(data)
@@ -403,7 +412,7 @@ class RAID_on_Cloud(NAS):
         
     
     def close(self, fd):
-        pass # intentionally pass
+        self.is_open[fd] = False
     
     def delete(self, filename):
         fd = self.open(filename)
@@ -517,7 +526,8 @@ class RAID_on_Cloud(NAS):
         
         # set the "is_final_block" for the last one
         if len(blocks) > 1:
-            blocks[-1][-1] = True
+            (use_aws, use_azure, use_gcs), block_uuid, local_start, local_end, _ = blocks[-1]
+            blocks[-1] = ((use_aws, use_azure, use_gcs), block_uuid, local_start, local_end, True)
             
         return blocks
     
