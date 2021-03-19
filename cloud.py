@@ -64,10 +64,6 @@ class AWS_S3(cloud_storage):
     def write_block(self, block, offset):
         data = str(block)
         key = str(offset)
-        # print ''
-        # print 'AWS write_block'
-        # print "    "+str(key)
-        # print "    "+str(len(block))
         try:
             self._delete_object(key=key)
         except Exception as error:
@@ -320,7 +316,12 @@ class Google_Cloud_Storage(cloud_storage):
     def delete_block(self, offset):
         key = str(offset)
         blob = self.bucket.blob(key)
-        return blob.delete()
+        blob.delete()
+        # wait until the job is done
+        import time
+        while time.sleep(0.5):
+            if self.read_block(offset=key) is None:
+                break
     
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from google.cloud.storage
@@ -390,9 +391,10 @@ class RAID_on_Cloud(NAS):
             # convert from fixed length into full unicode
             return self._garbled_ascii_to_utf8(output)
         except Exception as error:
-            # print('error = ', error)
+            print('error = ', error)
             tb = traceback.format_exc()
-            # print(tb)
+            print(tb)
+            return ""
     
     def write(self, fd, data, offset):
         """
@@ -430,13 +432,10 @@ class RAID_on_Cloud(NAS):
                         prexisting_string = str(prexisting_string)
                     
                     base_data = prexisting_string + base_data
-                    print('is_final_block = ', is_final_block)
-                    print('base_data = ', base_data[0:50])
                     # the start is always filled up with some kind of data
                     pre_data = base_data[0:local_start]
                     # the ending data won't be preserved if this is the final block
                     post_data = base_data[local_end:self.block_size] if not is_final_block else ""
-                    print('pre_data:',pre_data[0:50],', data_for_block:',data_for_block[0:50],", post_data:", post_data[0:50])
                     # if only writing in the middle, make sure to pad the sides
                     data_for_block = pre_data + data_for_block + post_data
                     # len(data_for_block) should be self.block_size for sure if its not the final block
@@ -450,13 +449,16 @@ class RAID_on_Cloud(NAS):
     
     def delete(self, filename):
         fd = self.open(filename)
-        file_prefix = self._get_prefix(filename)
+        file_prefix = self._get_prefix(fd)
+        print('file_prefix = ', file_prefix)
         for each_backend in self.backends:
             uuids = each_backend.list_blocks()
             for each_block_id in uuids:
                 if type(each_block_id) == str:
                     if each_block_id.startswith(file_prefix):
-                        each_backend.delete_block(offset=each_block_id)
+                        print('each_block_id = ', each_block_id)
+                        print('calling delete_block under '+str(each_backend))
+                        each_backend.delete_block(each_block_id)
     
     def _utf8_to_garbled_ascii(self, string):
         # is this very roundabout? yes
@@ -517,14 +519,10 @@ class RAID_on_Cloud(NAS):
         end_block_index = 0
         
         blocks_past = start_offset / self.block_size
-        print('blocks_past = ', blocks_past)
         actual_start_block_index = self.block_size * blocks_past
         local_start = start_offset - actual_start_block_index
-        print('local_start = ', local_start)
         
-        print('end_offset = ', end_offset)
         blocks_till_end = end_offset / self.block_size
-        print('blocks_till_end = ', blocks_till_end)
         local_end = min([ self.block_size, end_offset - actual_start_block_index ])
         
         if local_start > local_end:
@@ -544,14 +542,9 @@ class RAID_on_Cloud(NAS):
         segments = []
         missing_number_of_bytes = end_index - start_index
         while missing_number_of_bytes > 0:
-            print '     _get_address_range: start_index = ', start_index
-            print '     _get_address_range: end_index = ', end_index
             block_index, local_start, local_end = self._get_address_range(start_offset=start_index, end_offset=end_index)
-            print('local_start = ', local_start)
-            print('local_end = ', local_end)
             bytes_gathered = local_end - local_start
             missing_number_of_bytes -= bytes_gathered
-            print('missing_number_of_bytes = ', missing_number_of_bytes)
             segments.append((block_index, local_start, local_end))
             start_index = block_index + local_end
         
