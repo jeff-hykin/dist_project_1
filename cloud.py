@@ -44,20 +44,29 @@ class AWS_S3(cloud_storage):
         return self.s3.Object(self.bucket_name, *args, **kwargs)
         
     def list_blocks(self):
+        output = []
         for each in self._list_objects():
-            print(each.key)
+            try:
+                output.append(int(each.key))
+            except Exception as error:
+                output.append(each.key)
+        return output
 
     def read_block(self, offset):
+        key = str(offset)
         try:
-            return self._get_object(key=offset)
+            return bytearray(self._get_object(key=key))
         except botocore.exceptions.ClientError as e:
             return None
 
     def write_block(self, block, offset):
-        return self._put_object(key=offset, data=block)
+        data = str(block)
+        key = str(offset)
+        return self._put_object(key=key, data=data)
 
     def delete_block(self, offset):
-        return self._delete_object(key=offset)
+        key = str(offset)
+        return self._delete_object(key=key)
     
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from boto3
@@ -139,8 +148,7 @@ class AWS_S3(cloud_storage):
                 objects = list(bucket.objects.all())
             else:
                 objects = list(bucket.objects.filter(Prefix=prefix))
-            logger.info("Got objects %s from bucket '%s'",
-                        [o.key for o in objects], bucket.name)
+            logger.info("Got objects %s from bucket '%s'", [o.key for o in objects], bucket.name)
         except ClientError:
             logger.exception("Couldn't get objects for bucket '%s'.", bucket.name)
             raise
@@ -215,28 +223,33 @@ class Azure_Blob_Storage(cloud_storage):
         from azure.storage.blob import BlobServiceClient
         self.blob_service_client = BlobServiceClient.from_connection_string(self.conn_str)
         self.container_client = self.blob_service_client.get_container_client(container=self.container_name)
-        # self.blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=local_file_name)
-        
-
-        # Instantiate a ContainerClient
 
     def list_blocks(self):
+        output = []
         for each in self.container_client.list_blobs():
-            print(each.name)
+            try:
+                output.append(int(each.name))
+            except Exception as error:
+                output.append(each.name)
+        return output
             
     def read_block(self, offset):
+        key = str(offset)
         try:
-            blob_client = self.blob_service_client.get_blob_client(self.container_name, offset)
-            return blob_client.download_blob().readall()
+            blob_client = self.blob_service_client.get_blob_client(self.container_name, key)
+            return bytearray(blob_client.download_blob().readall())
         except Exception as error:
             return None
 
     def write_block(self, block, offset):
-        blob_client = self.blob_service_client.get_blob_client(self.container_name, offset)
-        return blob_client.upload_blob(block, overwrite=True)
+        data = str(block)
+        key = str(offset)
+        blob_client = self.blob_service_client.get_blob_client(self.container_name, key)
+        return blob_client.upload_blob(data, overwrite=True)
         
     def delete_block(self, offset):
-        blob_client = self.blob_service_client.get_blob_client(self.container_name, offset)
+        key = str(offset)
+        blob_client = self.blob_service_client.get_blob_client(self.container_name, key)
         return blob_client.delete_blob()
     
     # Implement the abstract functions from cloud_storage
@@ -261,31 +274,33 @@ class Google_Cloud_Storage(cloud_storage):
         self.bucket_name = "csce678-s21-p1-326001802"
         self.client = storage.Client.from_service_account_json(self.credential_file)
         self.bucket = self.client.lookup_bucket(self.bucket_name)
-        
-        # self.bucket.delete_blob
-        # self.bucket.get_blob
-        # self.bucket.labels
-        # self.bucket.list_blobs
-        # self.bucket.blob
-        
-        
+            
     def list_blocks(self):
+        output = []
         for each in self.bucket.list_blobs():
-            print(str(each.name))
+            try:
+                output.append(int(each.name))
+            except Exception as error:
+                output.append(str(each.name))
+        return output
 
     def read_block(self, offset):
-        blob = self.bucket.blob(offset)
+        key = str(offset)
+        blob = self.bucket.blob(key)
         try:
-            return blob.download_as_string()
+            return bytearray(blob.download_as_string())
         except Exception as error:
             return None
 
     def write_block(self, block, offset):
-        blob = self.bucket.blob(offset)
-        return blob.upload_from_string(block)
+        data = str(block)
+        key = str(offset)
+        blob = self.bucket.blob(key)
+        return blob.upload_from_string(data)
 
     def delete_block(self, offset):
-        blob = self.bucket.blob(offset)
+        key = str(offset)
+        blob = self.bucket.blob(key)
         return blob.delete()
     
     # Implement the abstract functions from cloud_storage
@@ -331,7 +346,7 @@ class RAID_on_Cloud(NAS):
             block_addition = None
             for use_service, backend in zip(use_backend, self.backends):
                 if use_service:
-                    block_string = backend.read_block(offset=block_id)
+                    block_string = str(backend.read_block(offset=block_id))
                     # make resiliant by only working if the backend works
                     if type(block_string) == str:
                         block_addition = block_string[block_start_within_string:block_end_within_string]
@@ -344,8 +359,7 @@ class RAID_on_Cloud(NAS):
             output += block_addition
         
         # convert from fixed length into full unicode
-        unicode_output = self._garbled_ascii_to_utf8(output)
-        print(unicode_output)
+        return self._garbled_ascii_to_utf8(output)
     
     def write(self, fd, data, offset):
         """
@@ -370,7 +384,7 @@ class RAID_on_Cloud(NAS):
                 if use_service:
                     # create a filler of 0's if no data exists
                     base_data = str(bytearray(self.block_size))
-                    prexisting_string = backend.read_block(offset=block_uuid)
+                    prexisting_string = str(backend.read_block(offset=block_uuid))
                     if prexisting_string is None:
                         prexisting_string = ""
                     
