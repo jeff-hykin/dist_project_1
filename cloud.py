@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import random
+import traceback
 
 from botocore.exceptions import ClientError
 import botocore
@@ -21,6 +22,7 @@ import hashlib
 import boto3
 
 hash_it = lambda value: hashlib.sha256(str(value).encode()).hexdigest()
+length = len
 
 class AWS_S3(cloud_storage):
     def __init__(self):
@@ -62,6 +64,14 @@ class AWS_S3(cloud_storage):
     def write_block(self, block, offset):
         data = str(block)
         key = str(offset)
+        # print ''
+        # print 'AWS write_block'
+        # print "    "+str(key)
+        # print "    "+str(len(block))
+        try:
+            self._delete_object(key=key)
+        except Exception as error:
+            pass
         return self._put_object(key=key, data=data)
 
     def delete_block(self, offset):
@@ -245,6 +255,10 @@ class Azure_Blob_Storage(cloud_storage):
     def write_block(self, block, offset):
         data = str(block)
         key = str(offset)
+        try:
+            self.delete_block(offset=key)
+        except Exception as error:
+            pass
         blob_client = self.blob_service_client.get_blob_client(self.container_name, key)
         return blob_client.upload_blob(data, overwrite=True)
         
@@ -296,6 +310,10 @@ class Google_Cloud_Storage(cloud_storage):
     def write_block(self, block, offset):
         data = str(block)
         key = str(offset)
+        try:
+            self.delete_block(offset=key)
+        except Exception as error:
+            pass
         blob = self.bucket.blob(key)
         return blob.upload_from_string(data)
 
@@ -334,39 +352,45 @@ class RAID_on_Cloud(NAS):
     
     def read(self, fd, len, offset):
         """
-        Reading the file descriptor up to the given number of bytes, at the given offset. Once the file is read successfully, the CLI will prints the output directly on the screen as UTF-8 strings.
+        # Reading the file descriptor up to the given number of bytes, at the given offset. Once the file is read successfully, the CLI will prints the output directly on the screen as UTF-8 strings.
         """
         if not self.is_open[fd]:
             return "" # I hope this is the right behavior
-        starting_point = offset
-        how_many_bytes = len
-        del len # len is a built in
-        block_ranges = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
-        index = 0
-        output = ""
-        # for each block
-        for (use_backend, block_id, local_start, local_end, is_final_block) in block_ranges:
-            block_start_within_string = index + local_start
-            block_end_within_string   = index + local_end
-            # increment for next block
-            index += local_end
-            block_addition = None
-            for use_service, backend in zip(use_backend, self.backends):
-                if use_service:
-                    block_string = str(backend.read_block(offset=block_id))
-                    # make resiliant by only working if the backend works
-                    if type(block_string) == str:
-                        block_addition = block_string[block_start_within_string:block_end_within_string]
-                        # if success, don't retreive the block from both
-                        break
-            # fail immediate / log
-            if type(block_addition) != str:
-                raise Exception('ERROR: block: '+str((use_backend, block_id, local_start, local_end, is_final_block))+'\n              (use_backend, block_id, local_start, local_end, is_final_block)\n\nhad an issue and wasnt able to get the data from any sources')
+        try:
             
-            output += block_addition
-        
-        # convert from fixed length into full unicode
-        return self._garbled_ascii_to_utf8(output)
+            starting_point = offset
+            how_many_bytes = len
+            del len # len is a built in
+            # print('starting_point+how_many_bytes = ', starting_point+how_many_bytes)
+            block_ranges = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
+            FS.json_write(block_ranges, to="block_ranges.dont-sync.json")
+            output = ""
+            # for each block
+            for (use_backend, block_id, local_start, local_end, is_final_block) in block_ranges:
+                # print '\n\nuse_backend, block_id, local_start, local_end, is_final_block\n', use_backend, block_id, local_start, local_end, is_final_block
+                # increment for next block
+                block_addition = None
+                for use_service, backend in zip(use_backend, self.backends):
+                    if use_service:
+                        block_string = str(backend.read_block(offset=block_id))
+                        # make resiliant by only working if the backend works
+                        if type(block_string) == str:
+                            block_addition = block_string[local_start:local_end]
+                            # if success, don't retreive the block from both
+                            break
+                # fail immediate / log
+                if type(block_addition) != str:
+                    raise Exception('ERROR: block: '+str((use_backend, block_id, local_start, local_end, is_final_block))+'\n              (use_backend, block_id, local_start, local_end, is_final_block)\n\nhad an issue and wasnt able to get the data from any sources')
+                # print('length(block_addition) = ', length(block_addition))
+                output += block_addition
+                
+            # print('length(output) = ', length(output))
+            # convert from fixed length into full unicode
+            return self._garbled_ascii_to_utf8(output)
+        except Exception as error:
+            # print('error = ', error)
+            tb = traceback.format_exc()
+            # print(tb)
     
     def write(self, fd, data, offset):
         """
@@ -420,8 +444,9 @@ class RAID_on_Cloud(NAS):
         for each_backend in self.backends:
             uuids = each_backend.list_blocks()
             for each_block_id in uuids:
-                if each_block_id.startswith(file_prefix):
-                    each_backend.delete_block(offset=each_block_id)
+                if type(each_block_id) == str:
+                    if each_block_id.startswith(file_prefix):
+                        each_backend.delete_block(offset=each_block_id)
     
     def _utf8_to_garbled_ascii(self, string):
         # is this very roundabout? yes
@@ -491,7 +516,7 @@ class RAID_on_Cloud(NAS):
         elif actual_end_block_index == actual_start_block_index:
             local_end = actual_end_offset
         else:
-            raise Exception('Something went wrong in _get_full_address_range(), end is before start\nfd='+str(fd)+'\n    start_block_index='+str(start_block_index)+'\n    start_offset='+str(start_offset)+'\n    end_block_index='+str(end_block_index)+'\n    end_offset='+str(end_offset))
+            raise Exception('Something went wrong in _get_full_address_range(), end is before start\n    start_block_index='+str(start_block_index)+'\n    start_offset='+str(start_offset)+'\n    end_block_index='+str(end_block_index)+'\n    end_offset='+str(end_offset))
         
         return actual_start_block_index, actual_start_offset, local_end
             
@@ -505,11 +530,18 @@ class RAID_on_Cloud(NAS):
         
         segments = []
         missing_number_of_bytes = end_index - start_index
+        # print('missing_number_of_bytes = ', missing_number_of_bytes)
+        btye_offset = 0
         while missing_number_of_bytes > 0:
-            block_index, local_start, local_end = self._get_address_range(start_offset=start_index, end_offset=end_index)
+            block_index, local_start, local_end = self._get_address_range(start_offset=(start_index+btye_offset), end_offset=end_index)
+            # print('block_index = ', block_index)
+            # print('local_start = ', local_start)
+            # print('local_end = ', local_end)
             bytes_gathered = local_end - local_start
+            # print('bytes_gathered = ', bytes_gathered)
             missing_number_of_bytes -= bytes_gathered
             segments.append((block_index, local_start, local_end))
+            btye_offset += self.block_size
         
         return segments
         
