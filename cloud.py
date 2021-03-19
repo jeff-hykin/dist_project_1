@@ -358,7 +358,6 @@ class RAID_on_Cloud(NAS):
             how_many_bytes = len
             del len # len is a built in
             block_ranges = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
-            FS.json_write(block_ranges, to="block_ranges.dont-sync.json")
             output = ""
             # for each block
             for (use_backend, block_id, local_start, local_end, is_final_block) in block_ranges:
