@@ -51,7 +51,7 @@ class AWS_S3(cloud_storage):
             try:
                 output.append(int(each.key))
             except Exception as error:
-                output.append(each.key)
+                output.append(str(each.key))
         return output
 
     def read_block(self, offset):
@@ -237,7 +237,7 @@ class Azure_Blob_Storage(cloud_storage):
             try:
                 output.append(int(each.name))
             except Exception as error:
-                output.append(each.name)
+                output.append(str(each.name))
         return output
             
     def read_block(self, offset):
@@ -316,12 +316,7 @@ class Google_Cloud_Storage(cloud_storage):
     def delete_block(self, offset):
         key = str(offset)
         blob = self.bucket.blob(key)
-        blob.delete()
-        # wait until the job is done
-        import time
-        while time.sleep(0.5):
-            if self.read_block(offset=key) is None:
-                break
+        return blob.delete()
     
     # Implement the abstract functions from cloud_storage
     # Hints: Use the following APIs from google.cloud.storage
@@ -362,13 +357,11 @@ class RAID_on_Cloud(NAS):
             starting_point = offset
             how_many_bytes = len
             del len # len is a built in
-            # print('starting_point+how_many_bytes = ', starting_point+how_many_bytes)
             block_ranges = self._get_block_ranges(fd, start_index=starting_point, end_index=(starting_point+how_many_bytes))
             FS.json_write(block_ranges, to="block_ranges.dont-sync.json")
             output = ""
             # for each block
             for (use_backend, block_id, local_start, local_end, is_final_block) in block_ranges:
-                # print '\n\nuse_backend, block_id, local_start, local_end, is_final_block\n', use_backend, block_id, local_start, local_end, is_final_block
                 # increment for next block
                 block_addition = None
                 for use_service, backend in zip(use_backend, self.backends):
@@ -384,16 +377,11 @@ class RAID_on_Cloud(NAS):
                 # fail immediate / log
                 if type(block_addition) != str:
                     raise Exception('ERROR: block: '+str((use_backend, block_id, local_start, local_end, is_final_block))+'\n              (use_backend, block_id, local_start, local_end, is_final_block)\n\nhad an issue and wasnt able to get the data from any sources')
-                # print('length(block_addition) = ', length(block_addition))
                 output += block_addition
                 
-            # print('length(output) = ', length(output))
             # convert from fixed length into full unicode
             return self._garbled_ascii_to_utf8(output)
         except Exception as error:
-            print('error = ', error)
-            tb = traceback.format_exc()
-            print(tb)
             return ""
     
     def write(self, fd, data, offset):
@@ -450,15 +438,27 @@ class RAID_on_Cloud(NAS):
     def delete(self, filename):
         fd = self.open(filename)
         file_prefix = self._get_prefix(fd)
-        print('file_prefix = ', file_prefix)
-        for each_backend in self.backends:
-            uuids = each_backend.list_blocks()
-            for each_block_id in uuids:
-                if type(each_block_id) == str:
-                    if each_block_id.startswith(file_prefix):
-                        print('each_block_id = ', each_block_id)
-                        print('calling delete_block under '+str(each_backend))
-                        each_backend.delete_block(each_block_id)
+        while True:
+            for each_backend in self.backends:
+                uuids = each_backend.list_blocks()
+                for each_block_id in uuids:
+                    if type(each_block_id) == str:
+                        if each_block_id.startswith(file_prefix):
+                            for backend in self.backends:
+                                try:
+                                    backend.delete_block(each_block_id)
+                                except Exception as error:
+                                    pass
+            
+            if len(self.read(fd, 1, 0)) > 0:
+                print('self.read(fd, 10, 0) = ', self.read(fd, 1, 0))
+                # wait until the job is done becase some of the backends 
+                # don't seem to perform the operation synchronously
+                import time
+                time.sleep(0.5)
+                continue
+            else:
+                break
     
     def _utf8_to_garbled_ascii(self, string):
         # is this very roundabout? yes
